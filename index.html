@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Borealis Storm</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #000;
+            font-family: 'Segoe UI', sans-serif;
+            user-select: none;
+        }
+
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+
+        /* Z-Index Stack */
+        #skyCanvas { z-index: 0; }
+        #auroraCanvas { z-index: 1; mix-blend-mode: screen; opacity: 0.95; }
+        #rainCanvas { z-index: 2; pointer-events: none; }
+        
+        #flash {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: #fff;
+            opacity: 0;
+            z-index: 5;
+            pointer-events: none;
+        }
+
+        /* UI */
+        #ui-wrapper {
+            position: absolute;
+            bottom: 40px;
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            z-index: 20;
+            pointer-events: none;
+        }
+
+        #ui-container {
+            pointer-events: auto;
+            background: rgba(8, 12, 16, 0.7);
+            backdrop-filter: blur(10px);
+            padding: 15px 40px;
+            border-radius: 50px;
+            border: 1px solid rgba(255,255,255,0.1);
+            box-shadow: 0 20px 50px rgba(0,0,0,0.8);
+            display: flex;
+            gap: 30px;
+            align-items: center;
+            opacity: 0.3;
+            transition: opacity 0.4s ease;
+        }
+
+        #ui-container:hover { opacity: 1; }
+
+        .control { display: flex; flex-direction: column; align-items: center; }
+        
+        .control label {
+            color: #6d8a9f;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+        }
+
+        input[type=range] {
+            -webkit-appearance: none;
+            width: 90px;
+            height: 3px;
+            background: rgba(255,255,255,0.15);
+            border-radius: 2px;
+            outline: none;
+        }
+
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 14px;
+            height: 14px;
+            background: #4fd;
+            border-radius: 50%;
+            cursor: pointer;
+            box-shadow: 0 0 10px #4fd;
+            transition: transform 0.1s;
+        }
+        
+        input[type=range]::-webkit-slider-thumb:hover { transform: scale(1.2); }
+
+        /* Overlay */
+        #overlay {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: #000;
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            transition: opacity 1.2s ease-out;
+        }
+
+        h1 {
+            color: white;
+            font-weight: 200;
+            font-size: 3rem;
+            letter-spacing: 8px;
+            margin: 0 0 10px 0;
+            text-shadow: 0 0 30px rgba(70, 255, 200, 0.4);
+        }
+        
+        p { color: #666; letter-spacing: 2px; font-size: 0.9rem; }
+    </style>
+</head>
+<body>
+
+    <div id="flash"></div>
+    <canvas id="skyCanvas"></canvas>
+    <canvas id="auroraCanvas"></canvas>
+    <canvas id="rainCanvas"></canvas>
+
+    <div id="overlay">
+        <h1>ETHER</h1>
+        <p>Click to Initialize</p>
+    </div>
+
+    <div id="ui-wrapper">
+        <div id="ui-container">
+            <div class="control">
+                <label>Rain</label>
+                <input type="range" id="vol" min="0" max="1" step="0.01" value="0.5">
+            </div>
+            <div class="control">
+                <label>Tone</label>
+                <input type="range" id="tone" min="100" max="1000" value="400">
+            </div>
+            <div class="control">
+                <label>Storm</label>
+                <input type="range" id="storm" min="0" max="100" value="30">
+            </div>
+            <div class="control">
+                <label>Flash</label>
+                <input type="range" id="light" min="0" max="1" step="0.01" value="0">
+            </div>
+            <div class="control">
+                <label>Aurora</label>
+                <input type="range" id="aurora" min="0" max="1" step="0.01" value="0.8">
+            </div>
+        </div>
+    </div>
+
+<script>
+    // --- Audio Engine ---
+    const UI = {
+        vol: document.getElementById('vol'),
+        tone: document.getElementById('tone'),
+        storm: document.getElementById('storm'),
+        light: document.getElementById('light'),
+        aurora: document.getElementById('aurora')
+    };
+
+    let audioCtx, noiseBuffer, rainGain, rainFilter;
+
+    function createPinkNoise(ctx) {
+        const bSize = ctx.sampleRate * 5;
+        const b = ctx.createBuffer(1, bSize, ctx.sampleRate);
+        const d = b.getChannelData(0);
+        let b0=0, b1=0, b2=0, b3=0, b4=0, b5=0, b6=0;
+        for (let i = 0; i < bSize; i++) {
+            const w = Math.random() * 2 - 1;
+            b0 = 0.99886 * b0 + w * 0.0555179;
+            b1 = 0.99332 * b1 + w * 0.0750759;
+            b2 = 0.96900 * b2 + w * 0.1538520;
+            b3 = 0.86650 * b3 + w * 0.3104856;
+            b4 = 0.55000 * b4 + w * 0.5329522;
+            b5 = -0.7616 * b5 - w * 0.0168980;
+            d[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362) * 0.11;
+            b6 = w * 0.115926;
+        }
+        return b;
+    }
+
+    async function initAudio() {
+        if (audioCtx) return;
+        const AC = window.AudioContext || window.webkitAudioContext;
+        audioCtx = new AC();
+        noiseBuffer = createPinkNoise(audioCtx);
+
+        const src = audioCtx.createBufferSource();
+        src.buffer = noiseBuffer;
+        src.loop = true;
+
+        rainFilter = audioCtx.createBiquadFilter();
+        rainFilter.type = 'lowpass';
+        rainFilter.frequency.value = UI.tone.value;
+
+        rainGain = audioCtx.createGain();
+        rainGain.gain.value = UI.vol.value;
+
+        src.connect(rainFilter).connect(rainGain).connect(audioCtx.destination);
+        src.start();
+
+        modulateRain();
+        scheduleThunder();
+    }
+
+    function modulateRain() {
+        if (!audioCtx) return;
+        const t = audioCtx.currentTime;
+        const base = parseFloat(UI.vol.value);
+        const target = Math.max(0, Math.min(1, base + (Math.random()*0.15 - 0.07)));
+        rainGain.gain.setTargetAtTime(target, t, 3);
+        setTimeout(modulateRain, 4000 + Math.random()*2000);
+    }
+
+    function triggerThunder() {
+        if (!audioCtx) return;
+        const amp = parseFloat(UI.light.value);
+        if (amp > 0) {
+            const el = document.getElementById('flash');
+            const pulses = Math.random() < 0.3 ? 1 : Math.floor(Math.random()*3)+2;
+            let d = 0;
+            for(let i=0; i<pulses; i++) {
+                setTimeout(() => {
+                    el.style.transition = 'opacity 0.05s';
+                    el.style.opacity = amp * (0.5 + Math.random()*0.5);
+                    setTimeout(() => {
+                        el.style.transition = 'opacity 0.8s ease-out';
+                        el.style.opacity = 0;
+                    }, 60);
+                }, d);
+                d += Math.random() * 150 + 50;
+            }
+        }
+
+        const t = audioCtx.currentTime;
+        const dur = 4 + Math.random()*6;
+        for(let i=0; i<3; i++) {
+            const src = audioCtx.createBufferSource();
+            src.buffer = noiseBuffer;
+            src.loop = true;
+            const f = audioCtx.createBiquadFilter();
+            f.type = 'lowpass';
+            f.frequency.value = 400; 
+            f.frequency.exponentialRampToValueAtTime(30, t + dur);
+            const g = audioCtx.createGain();
+            g.gain.value = 0;
+            const att = i * 0.5 + Math.random()*0.5;
+            g.gain.linearRampToValueAtTime(0.3 + Math.random()*0.3, t + att);
+            g.gain.exponentialRampToValueAtTime(0.001, t + att + dur);
+            const p = audioCtx.createStereoPanner();
+            p.pan.value = Math.random()*2 - 1;
+            src.connect(f).connect(g).connect(p).connect(audioCtx.destination);
+            src.start(t);
+            src.stop(t + dur + 2);
+        }
+    }
+
+    function scheduleThunder() {
+        if (!audioCtx) return;
+        const s = parseInt(UI.storm.value);
+        if (s > 0) {
+            const delay = 120000 / (s*1.2 + 1); 
+            setTimeout(() => {
+                if (Math.random() > 0.15) triggerThunder();
+                scheduleThunder();
+            }, delay * (0.5 + Math.random()));
+        } else {
+            setTimeout(scheduleThunder, 5000);
+        }
+    }
+
+    UI.vol.addEventListener('input', e => rainGain && rainGain.gain.setTargetAtTime(e.target.value, audioCtx.currentTime, 0.1));
+    UI.tone.addEventListener('input', e => rainFilter && rainFilter.frequency.setTargetAtTime(e.target.value, audioCtx.currentTime, 0.1));
+
+    // --- Visual Engine ---
+    const cvs = {
+        sky: document.getElementById('skyCanvas'),
+        aurora: document.getElementById('auroraCanvas'),
+        rain: document.getElementById('rainCanvas')
+    };
+    const ctx = {
+        sky: cvs.sky.getContext('2d'),
+        aurora: cvs.aurora.getContext('2d'),
+        rain: cvs.rain.getContext('2d')
+    };
+
+    let w, h;
+    function resize() {
+        w = window.innerWidth;
+        h = window.innerHeight;
+        Object.values(cvs).forEach(c => { c.width = w; c.height = h; });
+        drawSky();
+    }
+    window.addEventListener('resize', resize);
+
+    function drawSky() {
+        const c = ctx.sky;
+        const g = c.createRadialGradient(w/2, h, h*0.2, w/2, h, h*1.5);
+        g.addColorStop(0, '#111520'); 
+        g.addColorStop(0.5, '#040508');
+        g.addColorStop(1, '#000000');
+        c.fillStyle = g;
+        c.fillRect(0,0,w,h);
+        c.fillStyle = '#fff';
+        const stars = Math.floor(w*h/4000);
+        for(let i=0; i<stars; i++) {
+            c.globalAlpha = Math.random()*0.8 + 0.2;
+            c.beginPath(); 
+            c.arc(Math.random()*w, Math.random()*h*0.85, Math.random()*1.2, 0, 7); 
+            c.fill();
+        }
+    }
+
+    // --- AURORA LOGIC ---
+    class Aurora {
+        constructor() { this.time = 0; }
+        update() { this.time += 0.0025; }
+        draw(intensity) {
+            const c = ctx.aurora;
+            if (intensity <= 0.01) return;
+            c.globalCompositeOperation = 'lighter';
+
+            const beams = 800;
+            const cx = w/2;
+            
+            // CONFIGURATION:
+            // scaleTop: 0.75 means top is 75% width of bottom (subtle taper)
+            // yTop: -0.5 height means vanishing point is far above screen
+            const scaleTop = 0.75; 
+            const yTop = -h * 0.5; 
+            
+            for (let i = 0; i < beams; i++) {
+                if (Math.random() > (0.15 + intensity * 0.8)) continue;
+
+                const t = i / beams; // 0.0 to 1.0 along the curtain
+                
+                // Bottom Point calculation
+                let bx = (t * w * 1.4) - (w * 0.2); 
+                
+                // Fold Logic
+                bx += Math.sin(t * 12 + this.time) * (w * 0.1); 
+                bx += Math.sin(t * 25 - this.time * 1.5) * (w * 0.04);
+
+                let by = (h * 0.85) + Math.sin(t * 5 + this.time) * (h * 0.1);
+                by += Math.sin(t * 15 - this.time * 0.8) * (h * 0.05);
+
+                // Top Point Calculation (Perspective)
+                // Move bx relative to center, scale it (taper), move back
+                // With scaleTop 0.75, this is a much gentler inward slope
+                let tx = (bx - cx) * scaleTop + cx;
+                let ty = yTop; 
+
+                // Jitter
+                let jBy = by + (Math.random() * 80 - 40);
+                let jTy = ty + (Math.random() * 150 - 50);
+
+                // Color Gradient (Green to Purple)
+                let hue = 150 + (t * 110);
+                hue += Math.sin(this.time * 0.5) * 10;
+
+                let alpha = (Math.random() * 0.12 + 0.02) * intensity;
+                if(t<0.1) alpha *= t*10;
+                if(t>0.9) alpha *= (1-t)*10;
+
+                c.fillStyle = `hsla(${hue}, 85%, 60%, ${alpha})`;
+                
+                let bw = (Math.random() * 3 + 1) * (w/1200);
+                
+                c.beginPath();
+                c.moveTo(bx - bw, jBy);
+                c.lineTo(bx + bw, jBy);
+                c.lineTo(tx + bw*scaleTop, jTy); 
+                c.lineTo(tx - bw*scaleTop, jTy);
+                c.fill();
+            }
+            c.globalCompositeOperation = 'source-over';
+        }
+    }
+    const aurora = new Aurora();
+
+    // --- Rain ---
+    class Drop {
+        constructor() { this.reset(); this.y = Math.random()*h; }
+        reset() {
+            this.x = Math.random()*w;
+            this.y = -20;
+            this.z = Math.random(); 
+            this.len = 15 + this.z*20;
+            this.vel = 12 + this.z*12;
+            this.col = `rgba(200, 230, 255, ${0.3 + this.z*0.4})`;
+        }
+        update() { this.y += this.vel; if(this.y>h) this.reset(); }
+        draw() {
+            const c = ctx.rain;
+            c.beginPath(); c.strokeStyle = this.col;
+            c.lineWidth = 1 + this.z;
+            c.moveTo(this.x, this.y); c.lineTo(this.x, this.y + this.len);
+            c.stroke();
+        }
+    }
+    const drops = Array.from({length: 500}, ()=>new Drop());
+
+    function loop() {
+        ctx.aurora.clearRect(0,0,w,h);
+        ctx.rain.clearRect(0,0,w,h);
+        
+        aurora.update();
+        const av = parseFloat(UI.aurora.value);
+        if(av>0) aurora.draw(av);
+        
+        drops.forEach(d => { d.update(); d.draw(); });
+        requestAnimationFrame(loop);
+    }
+
+    resize();
+    loop();
+
+    document.getElementById('overlay').addEventListener('click', function() {
+        this.style.opacity = 0;
+        setTimeout(()=>this.style.display='none', 1200);
+        initAudio();
+    });
+</script>
+</body>
+</html>
