@@ -55,11 +55,15 @@
             display: flex;
             gap: 30px;
             align-items: center;
-            opacity: 0.3;
-            transition: opacity 0.4s ease;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.8s ease, visibility 0.8s ease;
         }
 
-        #ui-container:hover { opacity: 1; }
+        #ui-container.visible { 
+            opacity: 1; 
+            visibility: visible;
+        }
 
         .control { display: flex; flex-direction: column; align-items: center; }
         
@@ -70,6 +74,23 @@
             letter-spacing: 1.5px;
             text-transform: uppercase;
             margin-bottom: 8px;
+        }
+
+        .scene-btn {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            color: #6d8a9f;
+            font-size: 9px;
+            padding: 2px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .scene-btn.active {
+            background: rgba(79, 255, 221, 0.2);
+            color: #4fd;
+            border-color: #4fd;
         }
 
         input[type=range] {
@@ -122,7 +143,6 @@
 </head>
 <body>
 
-    <div id="flash"></div>
     <canvas id="skyCanvas"></canvas>
     <canvas id="auroraCanvas"></canvas>
     <canvas id="rainCanvas"></canvas>
@@ -134,6 +154,23 @@
 
     <div id="ui-wrapper">
         <div id="ui-container">
+            <div class="control">
+                <label>Scene</label>
+                <div style="display: flex; gap: 8px;">
+                    <div class="scene-btn active" onclick="setScene('aurora')">1</div>
+                    <div class="scene-btn" onclick="setScene('nebula')">2</div>
+                    <div class="scene-btn" onclick="setScene('resonance')">3</div>
+                    <div class="scene-btn" onclick="setScene('bubbles')">4</div>
+                    <div class="scene-btn" onclick="setScene('kaleidoscope')">5</div>
+                    <div class="scene-btn" onclick="setScene('fireflies')">6</div>
+                    <div class="scene-btn" onclick="setScene('ripples')">7</div>
+                    <div class="scene-btn" onclick="setScene('rainSplash')">8</div>
+                </div>
+            </div>
+            <div class="control">
+                <label>Brightness</label>
+                <input type="range" id="brightness" min="0" max="1" step="0.01" value="0.5">
+            </div>
             <div class="control">
                 <label>Rain</label>
                 <input type="range" id="vol" min="0" max="1" step="0.01" value="0.5">
@@ -150,14 +187,6 @@
                 <label>Storm</label>
                 <input type="range" id="storm" min="0" max="100" value="30">
             </div>
-            <div class="control">
-                <label>Flash</label>
-                <input type="range" id="light" min="0" max="1" step="0.01" value="0">
-            </div>
-            <div class="control">
-                <label>Aurora</label>
-                <input type="range" id="aurora" min="0" max="1" step="0.01" value="0.8">
-            </div>
         </div>
     </div>
 
@@ -168,8 +197,7 @@
         lowTone: document.getElementById('lowTone'),
         highTone: document.getElementById('highTone'),
         storm: document.getElementById('storm'),
-        light: document.getElementById('light'),
-        aurora: document.getElementById('aurora')
+        brightness: document.getElementById('brightness')
     };
 
     let audioCtx, noiseBuffer, rainGain, rainFilter;
@@ -230,24 +258,7 @@
 
     function triggerThunder() {
         if (!audioCtx) return;
-        const amp = parseFloat(UI.light.value);
-        if (amp > 0) {
-            const el = document.getElementById('flash');
-            const pulses = Math.random() < 0.3 ? 1 : Math.floor(Math.random()*3)+2;
-            let d = 0;
-            for(let i=0; i<pulses; i++) {
-                setTimeout(() => {
-                    el.style.transition = 'opacity 0.05s';
-                    el.style.opacity = amp * (0.5 + Math.random()*0.5);
-                    setTimeout(() => {
-                        el.style.transition = 'opacity 0.8s ease-out';
-                        el.style.opacity = 0;
-                    }, 60);
-                }, d);
-                d += Math.random() * 150 + 50;
-            }
-        }
-
+        
         const t = audioCtx.currentTime;
         const dur = 4 + Math.random()*6;
         for(let i=0; i<3; i++) {
@@ -287,6 +298,15 @@
 
     UI.vol.addEventListener('input', e => rainGain && rainGain.gain.setTargetAtTime(e.target.value, audioCtx.currentTime, 0.1));
 
+    let activeScene = 'aurora';
+    function setScene(name) {
+        activeScene = name;
+        document.querySelectorAll('.scene-btn').forEach((btn, i) => {
+            const scenes = ['aurora', 'nebula', 'resonance', 'bubbles', 'kaleidoscope', 'fireflies', 'ripples', 'rainSplash'];
+            btn.classList.toggle('active', scenes[i] === name);
+        });
+    }
+
     // --- Visual Engine ---
     const cvs = {
         sky: document.getElementById('skyCanvas'),
@@ -305,6 +325,15 @@
         h = window.innerHeight;
         Object.values(cvs).forEach(c => { c.width = w; c.height = h; });
         stars = Array.from({length: Math.floor(w*h/4000)}, () => new Star());
+        
+        // Re-init nebula and bubbles on large resize
+        if (typeof nebula !== 'undefined') nebula.init();
+        if (typeof bubbles !== 'undefined') bubbles.init();
+        if (typeof kaleidoscope !== 'undefined') kaleidoscope.init();
+        if (typeof fireflies !== 'undefined') fireflies.init();
+        if (typeof ripples !== 'undefined') ripples.init();
+        if (typeof rainSplash !== 'undefined') rainSplash.init();
+        
         drawSky();
     }
     window.addEventListener('resize', resize);
@@ -332,7 +361,8 @@
             const y = this.cy + Math.sin(this.angle) * this.r;
             if (x < 0 || x > w || y < 0 || y > h * 0.9) return;
             const c = ctx.sky;
-            c.globalAlpha = this.alpha;
+            const intensity = UI.brightness ? parseFloat(UI.brightness.value) : 1;
+            c.globalAlpha = this.alpha * intensity;
             c.beginPath();
             c.arc(x, y, this.size, 0, Math.PI * 2);
             c.fill();
@@ -421,6 +451,364 @@
         }
     }
     const aurora = new Aurora();
+    
+    // --- NEBULA LOGIC ---
+    class Nebula {
+        constructor() {
+            this.init();
+        }
+        init() {
+            this.blobs = Array.from({length: 8}, () => ({
+                x: Math.random() * w,
+                y: Math.random() * h,
+                vx: (Math.random() - 0.5) * 0.2,
+                vy: (Math.random() - 0.5) * 0.2,
+                size: Math.random() * (w * 0.4) + w * 0.2,
+                hue: Math.random() * 60 + 200, // Blues and purples
+                alpha: Math.random() * 0.2 + 0.1
+            }));
+        }
+        update() {
+            this.blobs.forEach(b => {
+                b.x += b.vx;
+                b.y += b.vy;
+                if (b.x < -b.size) b.x = w + b.size;
+                if (b.x > w + b.size) b.x = -b.size;
+                if (b.y < -b.size) b.y = h + b.size;
+                if (b.y > h + b.size) b.y = -b.size;
+            });
+        }
+        draw(intensity) {
+            const c = ctx.aurora;
+            c.globalCompositeOperation = 'screen';
+            this.blobs.forEach(b => {
+                const g = c.createRadialGradient(b.x, b.y, 0, b.x, b.y, b.size);
+                g.addColorStop(0, `hsla(${b.hue}, 70%, 50%, ${b.alpha * intensity})`);
+                g.addColorStop(1, 'transparent');
+                c.fillStyle = g;
+                c.fillRect(0, 0, w, h);
+            });
+            c.globalCompositeOperation = 'source-over';
+        }
+    }
+    const nebula = new Nebula();
+
+    // --- RESONANCE LOGIC ---
+    class Resonance {
+        constructor() {
+            this.rings = Array.from({length: 5}, (_, i) => ({
+                delay: i * 0.2,
+                life: Math.random()
+            }));
+        }
+        update() {
+            this.rings.forEach(r => {
+                r.life += 0.005;
+                if (r.life > 1) r.life = 0;
+            });
+        }
+        draw(intensity) {
+            const c = ctx.aurora;
+            // Map currentTone to a normalized value (e.g. 0.2 to 1.5)
+            const low = parseFloat(UI.lowTone.value);
+            const high = parseFloat(UI.highTone.value);
+            const t = (currentTone - low) / (high - low || 1);
+            
+            c.strokeStyle = `hsla(${180 + t * 60}, 80%, 60%, ${0.3 * intensity})`;
+            c.lineWidth = 2;
+            
+            this.rings.forEach(r => {
+                const size = (r.life * h * 0.8) * (0.8 + t * 0.4);
+                const alpha = Math.sin(r.life * Math.PI) * intensity * 0.5;
+                c.beginPath();
+                c.arc(w/2, h/2, size, 0, Math.PI * 2);
+                c.strokeStyle = `hsla(${180 + t * 60}, 80%, 60%, ${alpha})`;
+                c.lineWidth = 1 + t * 5;
+                c.stroke();
+                
+                // Add a glow
+                c.shadowBlur = 20 * t;
+                c.shadowColor = `hsla(${180 + t * 60}, 80%, 60%, ${alpha})`;
+            });
+            c.shadowBlur = 0;
+        }
+    }
+    const resonance = new Resonance();
+
+    // --- BUBBLES LOGIC ---
+    class Bubbles {
+        constructor() {
+            this.init();
+        }
+        init() {
+            this.bubbles = Array.from({length: 40}, () => this.createBubble());
+        }
+        createBubble() {
+            return {
+                x: Math.random() * w,
+                y: h + 50,
+                r: Math.random() * 15 + 5,
+                speed: Math.random() * 0.5 + 0.2,
+                osc: Math.random() * Math.PI * 2,
+                oscSpeed: Math.random() * 0.02 + 0.01
+            };
+        }
+        update() {
+            this.bubbles.forEach(b => {
+                b.y -= b.speed;
+                b.osc += b.oscSpeed;
+                b.x += Math.sin(b.osc) * 0.3;
+                if (b.y < -50) {
+                    Object.assign(b, this.createBubble());
+                }
+            });
+        }
+        draw(intensity) {
+            const c = ctx.aurora;
+            c.strokeStyle = `rgba(255, 255, 255, ${0.2 * intensity})`;
+            c.lineWidth = 1;
+            this.bubbles.forEach(b => {
+                c.beginPath();
+                c.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+                c.stroke();
+                
+                // Highlight
+                c.beginPath();
+                c.arc(b.x - b.r * 0.3, b.y - b.r * 0.3, b.r * 0.1, 0, Math.PI * 2);
+                c.fillStyle = `rgba(255, 255, 255, ${0.1 * intensity})`;
+                c.fill();
+            });
+        }
+    }
+    const bubbles = new Bubbles();
+    
+    // --- KALEIDOSCOPE LOGIC ---
+    class Kaleidoscope {
+        constructor() {
+            this.time = 0;
+            this.init();
+        }
+        init() {
+            const diag = Math.sqrt(w*w + h*h);
+            this.shapes = Array.from({length: 12}, () => ({
+                size: Math.random() * (diag * 0.2) + diag * 0.1,
+                dist: Math.random() * (diag * 0.5),
+                speed: (Math.random() - 0.5) * 0.002,
+                angle: Math.random() * Math.PI * 2,
+                hue: Math.random() * 360,
+                type: Math.random() > 0.5 ? 'arc' : 'rect',
+                opacity: Math.random() * 0.1 + 0.05
+            }));
+        }
+        update() {
+            this.time += 0.002;
+            this.shapes.forEach(s => s.angle += s.speed);
+        }
+        draw(intensity) {
+            const c = ctx.aurora;
+            const segments = 10;
+            const step = (Math.PI * 2) / segments;
+            
+            c.save();
+            c.translate(w/2, h/2);
+            c.rotate(this.time * 0.1);
+
+            for (let i = 0; i < segments; i++) {
+                c.rotate(step);
+                c.save();
+                if (i % 2 === 0) c.scale(1, -1);
+                
+                this.shapes.forEach(s => {
+                    const x = Math.cos(s.angle) * s.dist;
+                    const y = Math.sin(s.angle) * s.dist;
+                    const alpha = s.opacity * intensity;
+                    
+                    c.fillStyle = `hsla(${s.hue}, 40%, 30%, ${alpha})`;
+                    c.strokeStyle = `hsla(${s.hue}, 40%, 50%, ${alpha * 1.5})`;
+                    c.lineWidth = 1;
+                    
+                    c.beginPath();
+                    if (s.type === 'arc') {
+                        c.arc(x, y, s.size, 0, Math.PI * 0.5);
+                        c.lineTo(x, y);
+                    } else {
+                        c.rect(x, y, s.size, s.size * 0.5);
+                    }
+                    c.fill();
+                    c.stroke();
+                });
+                c.restore();
+            }
+            c.restore();
+        }
+    }
+    const kaleidoscope = new Kaleidoscope();
+
+    // --- FIREFLIES LOGIC ---
+    class Fireflies {
+        constructor() {
+            this.init();
+        }
+        init() {
+            this.flies = Array.from({length: 30}, () => ({
+                x: Math.random() * w,
+                y: Math.random() * h,
+                vx: (Math.random() - 0.5) * 0.5,
+                vy: (Math.random() - 0.5) * 0.5,
+                life: Math.random() * Math.PI * 2,
+                speed: Math.random() * 0.02 + 0.01,
+                size: Math.random() * 2 + 1
+            }));
+        }
+        update() {
+            this.flies.forEach(f => {
+                f.x += f.vx + Math.sin(f.life) * 0.2;
+                f.y += f.vy + Math.cos(f.life) * 0.2;
+                f.life += f.speed;
+                
+                if (f.x < 0) f.x = w;
+                if (f.x > w) f.x = 0;
+                if (f.y < 0) f.y = h;
+                if (f.y > h) f.y = 0;
+            });
+        }
+        draw(intensity) {
+            const c = ctx.aurora;
+            this.flies.forEach(f => {
+                const alpha = (Math.sin(f.life) * 0.5 + 0.5) * intensity;
+                if (alpha <= 0) return;
+                
+                c.beginPath();
+                const g = c.createRadialGradient(f.x, f.y, 0, f.x, f.y, f.size * 10);
+                g.addColorStop(0, `rgba(255, 255, 150, ${alpha * 0.8})`);
+                g.addColorStop(0.2, `rgba(255, 255, 100, ${alpha * 0.2})`);
+                g.addColorStop(1, 'transparent');
+                c.fillStyle = g;
+                c.arc(f.x, f.y, f.size * 10, 0, Math.PI * 2);
+                c.fill();
+                
+                c.beginPath();
+                c.fillStyle = `rgba(255, 255, 200, ${alpha})`;
+                c.arc(f.x, f.y, f.size, 0, Math.PI * 2);
+                c.fill();
+            });
+        }
+    }
+    const fireflies = new Fireflies();
+
+    // --- RIPPLES LOGIC ---
+    class Ripples {
+        constructor() {
+            this.init();
+        }
+        init() {
+            this.ripples = [];
+            this.timer = 0;
+        }
+        update() {
+            this.timer++;
+            if (this.timer % 60 === 0 && this.ripples.length < 10) {
+                this.ripples.push({
+                    x: Math.random() * w,
+                    y: Math.random() * h,
+                    r: 0,
+                    maxR: Math.random() * 100 + 50,
+                    alpha: 1
+                });
+            }
+            this.ripples.forEach((r, i) => {
+                r.r += 0.5;
+                r.alpha -= 0.005;
+                if (r.alpha <= 0) this.ripples.splice(i, 1);
+            });
+        }
+        draw(intensity) {
+            const c = ctx.aurora;
+            c.lineWidth = 1;
+            this.ripples.forEach(r => {
+                const alpha = r.alpha * intensity * 0.3;
+                c.beginPath();
+                c.strokeStyle = `rgba(200, 220, 255, ${alpha})`;
+                c.arc(r.x, r.y, r.r, 0, Math.PI * 2);
+                c.stroke();
+                
+                // Secondary subtle ripple
+                if (r.r > 20) {
+                    c.beginPath();
+                    c.strokeStyle = `rgba(200, 220, 255, ${alpha * 0.5})`;
+                    c.arc(r.x, r.y, r.r - 20, 0, Math.PI * 2);
+                    c.stroke();
+                }
+            });
+        }
+    }
+    const ripples = new Ripples();
+
+    // --- RAIN SPLASH LOGIC ---
+    class RainSplash {
+        constructor() {
+            this.init();
+        }
+        init() {
+            this.drops = Array.from({length: 150}, () => this.createDrop());
+            this.splashes = [];
+        }
+        createDrop() {
+            // Perspective: splash point on the screen (y > h*0.4)
+            const targetY = h * (0.4 + Math.random() * 0.6);
+            // Perspective scale: things further away (lower targetY) are smaller/slower
+            const scale = (targetY - h * 0.3) / (h * 0.7);
+            
+            return {
+                x: Math.random() * w,
+                y: Math.random() * -h,
+                targetY: targetY,
+                speed: (10 + Math.random() * 10) * scale,
+                len: (10 + Math.random() * 20) * scale,
+                scale: scale
+            };
+        }
+        update() {
+            this.drops.forEach(d => {
+                d.y += d.speed;
+                if (d.y > d.targetY) {
+                    this.splashes.push({
+                        x: d.x,
+                        y: d.targetY,
+                        r: 0,
+                        alpha: 0.5 * d.scale,
+                        maxR: 30 * d.scale,
+                        scale: d.scale
+                    });
+                    Object.assign(d, this.createDrop());
+                }
+            });
+            this.splashes.forEach((s, i) => {
+                s.r += 0.5 * s.scale;
+                s.alpha -= 0.01;
+                if (s.alpha <= 0) this.splashes.splice(i, 1);
+            });
+        }
+        draw(intensity) {
+            const c = ctx.aurora;
+            c.lineWidth = 1;
+            this.drops.forEach(d => {
+                c.strokeStyle = `rgba(200, 220, 255, ${0.3 * intensity * d.scale})`;
+                c.beginPath();
+                c.moveTo(d.x, d.y);
+                c.lineTo(d.x, d.y + d.len);
+                c.stroke();
+            });
+            this.splashes.forEach(s => {
+                c.beginPath();
+                // Perspective ellipse: wider than it is tall
+                c.ellipse(s.x, s.y, s.r * 2, s.r * 0.5, 0, 0, Math.PI * 2);
+                c.strokeStyle = `rgba(200, 220, 255, ${s.alpha * intensity})`;
+                c.stroke();
+            });
+        }
+    }
+    const rainSplash = new RainSplash();
 
     // --- Rain ---
     class Drop {
@@ -436,7 +824,9 @@
         update() { this.y += this.vel; if(this.y>h) this.reset(); }
         draw() {
             const c = ctx.rain;
-            c.beginPath(); c.strokeStyle = this.col;
+            const intensity = UI.brightness ? parseFloat(UI.brightness.value) : 1;
+            c.beginPath(); 
+            c.strokeStyle = `rgba(200, 230, 255, ${(0.3 + this.z*0.4) * intensity})`;
             c.lineWidth = 1 + this.z;
             c.moveTo(this.x, this.y); c.lineTo(this.x, this.y + this.len);
             c.stroke();
@@ -474,9 +864,34 @@
         ctx.rain.clearRect(0,0,w,h);
         
         updateTone();
-        aurora.update();
-        const av = parseFloat(UI.aurora.value);
-        if(av>0) aurora.draw(av);
+        
+        const brightness = parseFloat(UI.brightness.value);
+        
+        if (activeScene === 'aurora') {
+            aurora.update();
+            if(brightness > 0) aurora.draw(brightness);
+        } else if (activeScene === 'nebula') {
+            nebula.update();
+            if(brightness > 0) nebula.draw(brightness);
+        } else if (activeScene === 'resonance') {
+            resonance.update();
+            if(brightness > 0) resonance.draw(brightness);
+        } else if (activeScene === 'bubbles') {
+            bubbles.update();
+            if(brightness > 0) bubbles.draw(brightness);
+        } else if (activeScene === 'kaleidoscope') {
+            kaleidoscope.update();
+            if(brightness > 0) kaleidoscope.draw(brightness);
+        } else if (activeScene === 'fireflies') {
+            fireflies.update();
+            if(brightness > 0) fireflies.draw(brightness);
+        } else if (activeScene === 'ripples') {
+            ripples.update();
+            if(brightness > 0) ripples.draw(brightness);
+        } else if (activeScene === 'rainSplash') {
+            rainSplash.update();
+            if(brightness > 0) rainSplash.draw(brightness);
+        }
         
         drops.forEach(d => { d.update(); d.draw(); });
         requestAnimationFrame(loop);
@@ -489,7 +904,31 @@
         this.style.opacity = 0;
         setTimeout(()=>this.style.display='none', 1200);
         initAudio();
+        showUI();
     });
+
+    // --- UI Auto-hide ---
+    let uiTimeout;
+    const uiContainer = document.getElementById('ui-container');
+
+    function showUI() {
+        uiContainer.classList.add('visible');
+        clearTimeout(uiTimeout);
+        uiTimeout = setTimeout(hideUI, 3000);
+    }
+
+    function hideUI() {
+        if (!uiContainer.matches(':hover')) {
+            uiContainer.classList.remove('visible');
+        } else {
+            // If mouse is hovering, check again in a bit
+            uiTimeout = setTimeout(hideUI, 1000);
+        }
+    }
+
+    window.addEventListener('mousemove', showUI);
+    window.addEventListener('mousedown', showUI);
+    window.addEventListener('touchstart', showUI);
 </script>
 </body>
 </html>
