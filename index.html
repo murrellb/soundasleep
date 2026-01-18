@@ -296,16 +296,55 @@
         }
     }
 
-    UI.vol.addEventListener('input', e => rainGain && rainGain.gain.setTargetAtTime(e.target.value, audioCtx.currentTime, 0.1));
+    UI.vol.addEventListener('input', e => {
+        if (rainGain) rainGain.gain.setTargetAtTime(e.target.value, audioCtx.currentTime, 0.1);
+        saveState();
+    });
+    UI.lowTone.addEventListener('input', saveState);
+    UI.highTone.addEventListener('input', saveState);
+    UI.storm.addEventListener('input', saveState);
+    UI.brightness.addEventListener('input', saveState);
 
     let activeScene = 'aurora';
-    function setScene(name) {
+    function setScene(name, skipSave = false) {
         activeScene = name;
         document.querySelectorAll('.scene-btn').forEach((btn, i) => {
             const scenes = ['aurora', 'nebula', 'resonance', 'bubbles', 'kaleidoscope', 'fireflies', 'ripples', 'rainSplash'];
             btn.classList.toggle('active', scenes[i] === name);
         });
+        if (!skipSave) saveState();
     }
+
+    // --- Persistence ---
+    function saveState() {
+        const state = {
+            vol: UI.vol.value,
+            lowTone: UI.lowTone.value,
+            highTone: UI.highTone.value,
+            storm: UI.storm.value,
+            brightness: UI.brightness.value,
+            activeScene: activeScene
+        };
+        localStorage.setItem('borealis_state', JSON.stringify(state));
+    }
+
+    function loadState() {
+        const saved = localStorage.getItem('borealis_state');
+        if (!saved) return;
+        try {
+            const state = JSON.parse(saved);
+            if (state.vol !== undefined) UI.vol.value = state.vol;
+            if (state.lowTone !== undefined) UI.lowTone.value = state.lowTone;
+            if (state.highTone !== undefined) UI.highTone.value = state.highTone;
+            if (state.storm !== undefined) UI.storm.value = state.storm;
+            if (state.brightness !== undefined) UI.brightness.value = state.brightness;
+            if (state.activeScene) setScene(state.activeScene, true);
+        } catch (e) {
+            console.error("Failed to load state", e);
+        }
+    }
+
+    loadState();
 
     // --- Visual Engine ---
     const cvs = {
