@@ -139,8 +139,12 @@
                 <input type="range" id="vol" min="0" max="1" step="0.01" value="0.5">
             </div>
             <div class="control">
-                <label>Tone</label>
-                <input type="range" id="tone" min="100" max="1000" value="400">
+                <label>Low Tone</label>
+                <input type="range" id="lowTone" min="50" max="1500" value="300">
+            </div>
+            <div class="control">
+                <label>High Tone</label>
+                <input type="range" id="highTone" min="50" max="1500" value="700">
             </div>
             <div class="control">
                 <label>Storm</label>
@@ -161,13 +165,16 @@
     // --- Audio Engine ---
     const UI = {
         vol: document.getElementById('vol'),
-        tone: document.getElementById('tone'),
+        lowTone: document.getElementById('lowTone'),
+        highTone: document.getElementById('highTone'),
         storm: document.getElementById('storm'),
         light: document.getElementById('light'),
         aurora: document.getElementById('aurora')
     };
 
     let audioCtx, noiseBuffer, rainGain, rainFilter;
+    let currentTone = 400;
+    let toneVelocity = 0;
 
     function createPinkNoise(ctx) {
         const bSize = ctx.sampleRate * 5;
@@ -200,7 +207,7 @@
 
         rainFilter = audioCtx.createBiquadFilter();
         rainFilter.type = 'lowpass';
-        rainFilter.frequency.value = UI.tone.value;
+        rainFilter.frequency.value = currentTone;
 
         rainGain = audioCtx.createGain();
         rainGain.gain.value = UI.vol.value;
@@ -279,7 +286,6 @@
     }
 
     UI.vol.addEventListener('input', e => rainGain && rainGain.gain.setTargetAtTime(e.target.value, audioCtx.currentTime, 0.1));
-    UI.tone.addEventListener('input', e => rainFilter && rainFilter.frequency.setTargetAtTime(e.target.value, audioCtx.currentTime, 0.1));
 
     // --- Visual Engine ---
     const cvs = {
@@ -298,12 +304,44 @@
         w = window.innerWidth;
         h = window.innerHeight;
         Object.values(cvs).forEach(c => { c.width = w; c.height = h; });
+        stars = Array.from({length: Math.floor(w*h/4000)}, () => new Star());
         drawSky();
     }
     window.addEventListener('resize', resize);
 
+    let stars = [];
+    class Star {
+        constructor() {
+            this.init();
+            this.angle = Math.random() * Math.PI * 2;
+        }
+        init() {
+            this.cx = w * 0.5;
+            this.cy = -h * 0.2; 
+            const distMax = Math.sqrt(w*w + h*h) * 1.2;
+            this.r = Math.random() * distMax;
+            this.size = Math.random() * 1.2;
+            this.alpha = Math.random() * 0.8 + 0.2;
+            this.speed = 0.00005 + Math.random() * 0.0001;
+        }
+        update() {
+            this.angle += this.speed;
+        }
+        draw() {
+            const x = this.cx + Math.cos(this.angle) * this.r;
+            const y = this.cy + Math.sin(this.angle) * this.r;
+            if (x < 0 || x > w || y < 0 || y > h * 0.9) return;
+            const c = ctx.sky;
+            c.globalAlpha = this.alpha;
+            c.beginPath();
+            c.arc(x, y, this.size, 0, Math.PI * 2);
+            c.fill();
+        }
+    }
+
     function drawSky() {
         const c = ctx.sky;
+        c.clearRect(0,0,w,h);
         const g = c.createRadialGradient(w/2, h, h*0.2, w/2, h, h*1.5);
         g.addColorStop(0, '#111520'); 
         g.addColorStop(0.5, '#040508');
@@ -311,13 +349,10 @@
         c.fillStyle = g;
         c.fillRect(0,0,w,h);
         c.fillStyle = '#fff';
-        const stars = Math.floor(w*h/4000);
-        for(let i=0; i<stars; i++) {
-            c.globalAlpha = Math.random()*0.8 + 0.2;
-            c.beginPath(); 
-            c.arc(Math.random()*w, Math.random()*h*0.85, Math.random()*1.2, 0, 7); 
-            c.fill();
-        }
+        stars.forEach(s => { 
+            s.update(); 
+            s.draw(); 
+        });
     }
 
     // --- AURORA LOGIC ---
@@ -350,7 +385,7 @@
                 bx += Math.sin(t * 12 + this.time) * (w * 0.1); 
                 bx += Math.sin(t * 25 - this.time * 1.5) * (w * 0.04);
 
-                let by = (h * 0.85) + Math.sin(t * 5 + this.time) * (h * 0.1);
+                let by = (h * 0.62) + Math.sin(t * 5 + this.time) * (h * 0.1);
                 by += Math.sin(t * 15 - this.time * 0.8) * (h * 0.05);
 
                 // Top Point Calculation (Perspective)
@@ -409,10 +444,36 @@
     }
     const drops = Array.from({length: 500}, ()=>new Drop());
 
+    function updateTone() {
+        if (!audioCtx || !rainFilter) return;
+        const low = parseFloat(UI.lowTone.value);
+        const high = parseFloat(UI.highTone.value);
+        
+        // Bounded random walk - slowed down
+        toneVelocity += (Math.random() - 0.5) * 0.4;
+        toneVelocity *= 0.996; 
+        currentTone += toneVelocity;
+        
+        const minT = Math.min(low, high);
+        const maxT = Math.max(low, high);
+        
+        if (currentTone < minT) {
+            currentTone = minT;
+            toneVelocity *= -0.5; // Bounce off bound
+        } else if (currentTone > maxT) {
+            currentTone = maxT;
+            toneVelocity *= -0.5;
+        }
+        
+        rainFilter.frequency.setTargetAtTime(currentTone, audioCtx.currentTime, 0.1);
+    }
+
     function loop() {
+        drawSky();
         ctx.aurora.clearRect(0,0,w,h);
         ctx.rain.clearRect(0,0,w,h);
         
+        updateTone();
         aurora.update();
         const av = parseFloat(UI.aurora.value);
         if(av>0) aurora.draw(av);
